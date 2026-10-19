@@ -1,100 +1,68 @@
-/**
- * Include the Geode headers.
- */
 #include <Geode/Geode.hpp>
-
-/**
- * Brings cocos2d and all Geode namespaces to the current scope.
- */
+#include <Geode/modify/GJBaseGameLayer.hpp>
 using namespace geode::prelude;
 
-/**
- * `$modify` lets you extend and modify GD's classes.
- * To hook a function in Geode, simply $modify the class
- * and write a new function definition with the signature of
- * the function you want to hook.
- *
- * Here we use the overloaded `$modify` macro to set our own class name,
- * so that we can use it for button callbacks.
- *
- * Notice the header being included, you *must* include the header for
- * the class you are modifying, or you will get a compile error.
- *
- * Another way you could do this is like this:
- *
- * struct MyMenuLayer : Modify<MyMenuLayer, MenuLayer> {};
- */
-#include <Geode/modify/MenuLayer.hpp>
-class $modify(MyMenuLayer, MenuLayer) {
-	/**
-	 * Typically classes in GD are initialized using the `init` function, (though not always!),
-	 * so here we use it to add our own button to the bottom menu.
-	 *
-	 * Note that for all hooks, your signature has to *match exactly*,
-	 * `void init()` would not place a hook!
-	*/
-	bool init() {
-		/**
-		 * We call the original init function so that the
-		 * original class is properly initialized.
-		 */
-		if (!MenuLayer::init()) {
-			return false;
-		}
+class $modify(BufferLayer, GJBaseGameLayer) {
+    struct Fields {
+        int left = 0;
+        bool held = false;
+        bool injecting = false;
+        int step = 0;
+        int corrected = 0;
+        CCLabelBMFont* label = nullptr;
+    };
 
-		/**
-		 * You can use methods from the `geode::log` namespace to log messages to the console,
-		 * being useful for debugging and such. See this page for more info about logging:
-		 * https://docs.geode-sdk.org/tutorials/logging
-		*/
-		log::debug("Hello from my MenuLayer::init hook! This layer has {} children.", this->getChildrenCount());
+    void pushButton(int button, bool p2) {
+        GJBaseGameLayer::pushButton(button, p2);
+        if (p2 || m_fields->injecting) return;
+        m_fields->held = true;
+        m_fields->left = Mod::get()->getSettingValue<int64_t>("frames");
+    }
 
-		/**
-		 * See this page for more info about buttons
-		 * https://docs.geode-sdk.org/tutorials/buttons
-		*/
-		auto myButton = CCMenuItemSpriteExtra::create(
-			CCSprite::createWithSpriteFrameName("GJ_likeBtn_001.png"),
-			this,
-			/**
-			 * Here we use the name we set earlier for our modify class.
-			*/
-			menu_selector(MyMenuLayer::onMyButton)
-		);
+    void releaseButton(int button, bool p2) {
+        if (!p2 && !m_fields->injecting) {
+            m_fields->held = false;
+            m_fields->left = 0;
+        }
+        GJBaseGameLayer::releaseButton(button, p2);
+    }
 
-		/**
-		 * Here we access the `bottom-menu` node by its ID, and add our button to it.
-		 * Node IDs are a Geode feature, see this page for more info about it:
-		 * https://docs.geode-sdk.org/tutorials/nodetree
-		*/
-		auto menu = this->getChildByID("bottom-menu");
-		menu->addChild(myButton);
+    void showIndicator() {
+        auto f = m_fields.self();
+        if (!f->label) {
+            f->label = CCLabelBMFont::create("", "bigFont.fnt");
+            f->label->setScale(0.4f);
+            f->label->setOpacity(0);
+            auto size = CCDirector::get()->getWinSize();
+            f->label->setPosition({size.width / 2, size.height - 20});
+            this->addChild(f->label, 1000);
+        }
+        f->label->setString(fmt::format("Buffer x{}", f->corrected).c_str());
+        f->label->stopAllActions();
+        f->label->setOpacity(255);
+        f->label->runAction(CCFadeOut::create(0.6f));
+    }
 
-		/**
-		 * The `_spr` string literal operator just prefixes the string with
-		 * your mod id followed by a slash. This is good practice for setting your own node ids.
-		*/
-		myButton->setID("my-button"_spr);
+    void processCommands(float dt) {
+        GJBaseGameLayer::processCommands(dt);
+        auto f = m_fields.self();
+        f->step++;
 
-		/**
-		 * We update the layout of the menu to ensure that our button is properly placed.
-		 * This is yet another Geode feature, see this page for more info about it:
-		 * https://docs.geode-sdk.org/tutorials/layouts
-		*/
-		menu->updateLayout();
+        if (f->held && f->left > 0) {
+            f->left--;
+            f->injecting = true;
+            GJBaseGameLayer::releaseButton(1, false);
+            GJBaseGameLayer::pushButton(1, false);
+            f->injecting = false;
 
-		/**
-		 * We return `true` to indicate that the class was properly initialized.
-		 */
-		return true;
-	}
-
-	/**
-	 * This is the callback function for the button we created earlier.
-	 * The signature for button callbacks must always be the same,
-	 * return type `void` and taking a `CCObject*`.
-	*/
-	void onMyButton(CCObject*) {
-		FLAlertLayer::create("Geode", "Hello from my custom mod!", "OK")->show();
-	}
+            f->corrected++;
+            if (Mod::get()->getSettingValue<bool>("log")) {
+                log::info("Buffer: click repetido en paso {} (x = {:.1f}, quedan {})",
+                    f->step, m_player1->getPositionX(), f->left);
+            }
+            if (Mod::get()->getSettingValue<bool>("indicator")) {
+                this->showIndicator();
+            }
+        }
+    }
 };
