@@ -17,6 +17,7 @@ jobs:
           bindings: geode-sdk/bindings
           bindings-ref: main
           combine: true
+          sdk: nightly
 
   package:
     name: Package builds
